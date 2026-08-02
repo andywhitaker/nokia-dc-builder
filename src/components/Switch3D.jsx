@@ -37,7 +37,8 @@ class TextureErrorBoundary extends React.Component {
 }
 
 function FrontTextureFace({ imagePath, width, height }) {
-  const texture = useTexture(imagePath);
+  const resolvedPath = `${import.meta.env.BASE_URL}${imagePath.startsWith('/') ? imagePath.slice(1) : imagePath}`;
+  const texture = useTexture(resolvedPath);
   if (texture) {
     texture.colorSpace = THREE.SRGBColorSpace;
   }
