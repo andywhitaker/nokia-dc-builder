@@ -487,6 +487,20 @@ export function FloorPlanContainer({
     setIsCustomUInput(false);
   };
 
+  // Helper to safely navigate to 3D Elevation view for a target rack
+  const handleNavigateToElevation = (targetRack) => {
+    if (!targetRack) {
+      onSwitchToElevation();
+      return;
+    }
+    // Automatically switch row filter to the target rack's row if different!
+    if (targetRack.rowId && targetRack.rowId !== selectedRowId) {
+      onSelectRow(targetRack.rowId);
+    }
+    onSelectRack(targetRack.id, false);
+    onSwitchToElevation();
+  };
+
   return (
     <div className="floor-plan-viewport">
       {/* Floor Plan Overhead Dynamic Toolbar (Context-Sensitive to Selection) */}
@@ -574,7 +588,7 @@ export function FloorPlanContainer({
 
             <button
               className="sm-btn primary-action"
-              onClick={onSwitchToElevation}
+              onClick={() => handleNavigateToElevation(singleSelectedRack)}
               title="Open 3D Elevation View for this Rack"
             >
               3D View <ArrowRight size={12} />
@@ -778,8 +792,7 @@ export function FloorPlanContainer({
                             onSelectRack(rackAtCell.id, e.shiftKey);
                           }}
                           onDoubleClick={() => {
-                            onSelectRack(rackAtCell.id, false);
-                            onSwitchToElevation();
+                            handleNavigateToElevation(rackAtCell);
                           }}
                           title={`Click to edit in top bar. Shift+Click to multi-select. Right-click to edit/delete.`}
                         >
@@ -798,8 +811,7 @@ export function FloorPlanContainer({
                               className="elevate-btn"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                onSelectRack(rackAtCell.id, false);
-                                onSwitchToElevation();
+                                handleNavigateToElevation(rackAtCell);
                               }}
                               title="Open 3D Elevation View"
                             >
