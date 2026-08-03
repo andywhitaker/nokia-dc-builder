@@ -21,11 +21,59 @@ export const CABLE_COLOR_PALETTE = [
   { hex: '#ef4444', label: 'Red (Critical Link)' },
 ];
 
-const LOCAL_STORAGE_KEY = 'nokia_dc_rack_builder_saved_state';
+const LOCAL_STORAGE_KEY = 'nokia_dc_rack_builder_saved_state_v5';
 
 const DEFAULT_ROWS = [
-  { id: 'row-a', name: 'Row A (Spine & Core)', color: '#00f0ff', rowIndex: 2 },
-  { id: 'row-b', name: 'Row B (Leaf Switches)', color: '#005aff', rowIndex: 6 },
+  { id: 'row-a', name: 'Row A', color: '#00f0ff', rowIndex: 2 },
+  { id: 'row-b', name: 'Row B', color: '#005aff', rowIndex: 6 },
+];
+
+const RACK_B1_ITEMS = [
+  {
+    id: 'inst-sxr-7730-1',
+    modelId: 'SXR-1X-44S',
+    startU: 42,
+    customName: 'Border Leaf 1 (Nokia 7730 SXR)',
+    status: 'ACTIVE',
+  },
+  {
+    id: 'inst-d3l-spine1',
+    modelId: 'IXR-D3L',
+    startU: 40,
+    customName: 'Spine-01 (Nokia 7220 IXR-D3L)',
+    status: 'ACTIVE',
+  },
+  {
+    id: 'inst-d2l-leaf1',
+    modelId: 'IXR-D2L',
+    startU: 38,
+    customName: 'Leaf-01 (Nokia 7220 IXR-D2L)',
+    status: 'ACTIVE',
+  },
+];
+
+const RACK_B2_ITEMS = [
+  {
+    id: 'inst-sxr-7730-2',
+    modelId: 'SXR-1X-44S',
+    startU: 42,
+    customName: 'Border Leaf 2 (Nokia 7730 SXR)',
+    status: 'ACTIVE',
+  },
+  {
+    id: 'inst-d3l-spine2',
+    modelId: 'IXR-D3L',
+    startU: 40,
+    customName: 'Spine-02 (Nokia 7220 IXR-D3L)',
+    status: 'ACTIVE',
+  },
+  {
+    id: 'inst-d2l-leaf2',
+    modelId: 'IXR-D2L',
+    startU: 38,
+    customName: 'Leaf-02 (Nokia 7220 IXR-D2L)',
+    status: 'ACTIVE',
+  },
 ];
 
 const DEFAULT_RACKS = [
@@ -47,20 +95,89 @@ const DEFAULT_RACKS = [
     totalU: 42,
     items: [],
   },
+  {
+    id: 'rack-3',
+    name: 'Rack 3',
+    rowId: 'row-b',
+    gridX: 2,
+    gridY: 6,
+    totalU: 42,
+    items: RACK_B1_ITEMS,
+  },
+  {
+    id: 'rack-4',
+    name: 'Rack 4',
+    rowId: 'row-b',
+    gridX: 3,
+    gridY: 6,
+    totalU: 42,
+    items: RACK_B2_ITEMS,
+  },
 ];
 
 const DEFAULT_CABLE_CONNECTIONS = [
+  // Row A Connections
   {
-    id: 'cbl-1',
+    id: 'cbl-rowa-1',
     fromPortId: 'inst-d3l-1:e1/1',
     toPortId: 'inst-d2l-1:e1/49',
     color: '#00f0ff',
   },
   {
-    id: 'cbl-2',
+    id: 'cbl-rowa-2',
     fromPortId: 'inst-d3l-1:e1/2',
     toPortId: 'inst-d2l-2:e1/49',
     color: '#ec4899',
+  },
+  // Row B Spine-Leaf Topology Connections (Spine 1 & 2 to Leaf 1 & 2)
+  {
+    id: 'cbl-1',
+    fromPortId: 'inst-d3l-spine1:e1/1',
+    toPortId: 'inst-d2l-leaf1:e1/49',
+    color: '#00f0ff',
+  },
+  {
+    id: 'cbl-2',
+    fromPortId: 'inst-d3l-spine1:e1/2',
+    toPortId: 'inst-d2l-leaf2:e1/49',
+    color: '#ec4899',
+  },
+  {
+    id: 'cbl-3',
+    fromPortId: 'inst-d3l-spine2:e1/1',
+    toPortId: 'inst-d2l-leaf1:e1/50',
+    color: '#00f0ff',
+  },
+  {
+    id: 'cbl-4',
+    fromPortId: 'inst-d3l-spine2:e1/2',
+    toPortId: 'inst-d2l-leaf2:e1/50',
+    color: '#ec4899',
+  },
+  // Border Leaf Connections (Leaf 1 & 2 25G SFP28 Ports up to Nokia 7730 SXR Border Leafs)
+  {
+    id: 'cbl-5',
+    fromPortId: 'inst-d2l-leaf1:e1/1',
+    toPortId: 'inst-sxr-7730-1:e1/1',
+    color: '#eab308',
+  },
+  {
+    id: 'cbl-6',
+    fromPortId: 'inst-d2l-leaf1:e1/2',
+    toPortId: 'inst-sxr-7730-2:e1/1',
+    color: '#a855f7',
+  },
+  {
+    id: 'cbl-7',
+    fromPortId: 'inst-d2l-leaf2:e1/1',
+    toPortId: 'inst-sxr-7730-1:e1/2',
+    color: '#eab308',
+  },
+  {
+    id: 'cbl-8',
+    fromPortId: 'inst-d2l-leaf2:e1/2',
+    toPortId: 'inst-sxr-7730-2:e1/2',
+    color: '#a855f7',
   },
 ];
 
@@ -85,17 +202,17 @@ export default function App() {
   // Named Data Center Rows State
   const [rows, setRows] = useState(() => savedState?.rows || DEFAULT_ROWS);
   
-  // Default selectedRowId to first row ('row-a') on initial visit instead of 'ALL'
+  // Default selectedRowId to 'row-a' on initial visit
   const [selectedRowId, setSelectedRowId] = useState(() => savedState?.selectedRowId || 'row-a');
 
   // Multi-Rack Data Center State with LocalStorage Restoration
   const [racks, setRacks] = useState(() => savedState?.racks || DEFAULT_RACKS);
-  const [selectedRackIds, setSelectedRackIds] = useState(() => savedState?.selectedRackIds || ['rack-1']);
+  const [selectedRackIds, setSelectedRackIds] = useState(() => savedState?.selectedRackIds || ['rack-1', 'rack-2']);
   const [cableConnections, setCableConnections] = useState(() => savedState?.cableConnections || DEFAULT_CABLE_CONNECTIONS);
   const [activeCableColor, setActiveCableColor] = useState(() => savedState?.activeCableColor || '#00f0ff');
   const [cabinetLightColor, setCabinetLightColor] = useState(() => savedState?.cabinetLightColor || '#00f0ff');
 
-  const [selectedDeviceId, setSelectedDeviceId] = useState('inst-d2l-1');
+  const [selectedDeviceId, setSelectedDeviceId] = useState('inst-d3l-1');
   const [viewPreset, setViewPreset] = useState('ISO'); // 'FRONT' | 'BACK' | 'ISO' | 'TOP'
   
   // Door controls
@@ -152,8 +269,8 @@ export default function App() {
     setRows(DEFAULT_ROWS);
     setSelectedRowId('row-a');
     setRacks(DEFAULT_RACKS);
-    setSelectedRackIds(['rack-1']);
-    setSelectedDeviceId('inst-d2l-1');
+    setSelectedRackIds(['rack-1', 'rack-2']);
+    setSelectedDeviceId('inst-d3l-1');
     setCableConnections(DEFAULT_CABLE_CONNECTIONS);
     setActiveCableColor('#00f0ff');
     setCabinetLightColor('#00f0ff');
