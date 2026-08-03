@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import './App.css';
 import { Header } from './components/Header';
 import { Sidebar } from './components/Sidebar';
 import { CanvasContainer } from './components/CanvasContainer';
+import { FloorPlanContainer } from './components/FloorPlanContainer';
 import { PortModal } from './components/PortModal';
 import { BOMModal } from './components/BOMModal';
 import { ResetConfirmModal } from './components/ResetConfirmModal';
@@ -21,16 +22,27 @@ export const CABLE_COLOR_PALETTE = [
 
 const LOCAL_STORAGE_KEY = 'nokia_dc_rack_builder_saved_state';
 
+const DEFAULT_ROWS = [
+  { id: 'row-a', name: 'Row A (Spine & Core)', color: '#00f0ff', rowIndex: 2 },
+  { id: 'row-b', name: 'Row B (Leaf Switches)', color: '#005aff', rowIndex: 6 },
+];
+
 const DEFAULT_RACKS = [
   {
     id: 'rack-1',
     name: 'Rack 1',
+    rowId: 'row-a',
+    gridX: 2,
+    gridY: 2,
     totalU: 42,
     items: INITIAL_RACK_ITEMS,
   },
   {
     id: 'rack-2',
     name: 'Rack 2',
+    rowId: 'row-a',
+    gridX: 3,
+    gridY: 2,
     totalU: 42,
     items: [],
   },
@@ -66,6 +78,15 @@ const loadSavedState = () => {
 export default function App() {
   const savedState = loadSavedState();
 
+  // Primary View Mode: 'ELEVATION' | 'FLOOR_PLAN'
+  const [mainViewMode, setMainViewMode] = useState('ELEVATION');
+
+  // Named Data Center Rows State
+  const [rows, setRows] = useState(() => savedState?.rows || DEFAULT_ROWS);
+  
+  // Default selectedRowId to first row ('row-a') on initial visit instead of 'ALL'
+  const [selectedRowId, setSelectedRowId] = useState(() => savedState?.selectedRowId || 'row-a');
+
   // Multi-Rack Data Center State with LocalStorage Restoration
   const [racks, setRacks] = useState(() => savedState?.racks || DEFAULT_RACKS);
   const [selectedRackIds, setSelectedRackIds] = useState(() => savedState?.selectedRackIds || ['rack-1']);
@@ -92,6 +113,8 @@ export default function App() {
   useEffect(() => {
     try {
       const stateToSave = {
+        rows,
+        selectedRowId,
         racks,
         selectedRackIds,
         cableConnections,
@@ -102,11 +125,13 @@ export default function App() {
     } catch (err) {
       console.error('Failed to save state to localStorage:', err);
     }
-  }, [racks, selectedRackIds, cableConnections, activeCableColor, cabinetLightColor]);
+  }, [rows, selectedRowId, racks, selectedRackIds, cableConnections, activeCableColor, cabinetLightColor]);
 
   // Reset Everything handler
   const handleConfirmResetAll = () => {
     localStorage.removeItem(LOCAL_STORAGE_KEY);
+    setRows(DEFAULT_ROWS);
+    setSelectedRowId('row-a');
     setRacks(DEFAULT_RACKS);
     setSelectedRackIds(['rack-1']);
     setSelectedDeviceId('inst-d2l-1');
@@ -117,59 +142,95 @@ export default function App() {
     setCableSourcePortId(null);
   };
 
-  // Handle single or Shift-click multi-rack selection
-  const handleSelectRack = (rackId, isShiftPressed = false) => {
+  // Row selection handler: automatically defaults back to Overview button mode when switching rows!
+  const handleSelectRow = useCallback((rowId) => {
+    setSelectedRowId(rowId);
+    setSelectedRackIds([]); // Reset to Overview Mode for the newly selected row
+    setSelectedDeviceId(null);
+  }, []);
+
+  // Performance-optimized handleSelectRack with useCallback
+  const handleSelectRack = useCallback((rackId, isShiftPressed = false) => {
     if (!rackId) {
       setSelectedRackIds([]);
       setSelectedDeviceId(null);
       return;
     }
 
-    if (isShiftPressed) {
-      if (selectedRackIds.includes(rackId)) {
-        const next = selectedRackIds.filter((id) => id !== rackId);
-        setSelectedRackIds(next);
+    setSelectedRackIds((prevSelected) => {
+      if (isShiftPressed) {
+        if (prevSelected.includes(rackId)) {
+          return prevSelected.filter((id) => id !== rackId);
+        } else {
+          return [...prevSelected, rackId];
+        }
       } else {
-        setSelectedRackIds([...selectedRackIds, rackId]);
+        if (prevSelected.length === 1 && prevSelected[0] === rackId) {
+          return []; // Deselect on second click
+        } else {
+          return [rackId];
+        }
       }
-    } else {
-      if (selectedRackIds.length === 1 && selectedRackIds[0] === rackId) {
-        setSelectedRackIds([]); // Deselect on second click
-      } else {
-        setSelectedRackIds([rackId]);
-      }
-    }
+    });
     setSelectedDeviceId(null);
-  };
+  }, []);
 
-  // Add a new rack frame to the right
-  const handleAddRack = () => {
-    const nextNum = racks.length + 1;
+  // Add a new rack frame placed directly to the RIGHT of the last rack in the active row
+  const handleAddRack = useCallback(() => {
     const newRackId = `rack-${Date.now().toString().slice(-4)}`;
-    const newRack = {
-      id: newRackId,
-      name: `Rack ${nextNum}`,
-      totalU: 42,
-      items: [],
-    };
-    setRacks((prev) => [...prev, newRack]);
 
-    if (selectedRackIds.length === 0) {
-      // Overview Mode: Keep Overview Mode active (display all closed cabinets)
-    } else if (selectedRackIds.length === 1) {
-      // Single Rack Focus Mode: Switch focus to the new rack
-      setSelectedRackIds([newRackId]);
-    } else {
-      // Multi-Rack Cabling Mode: Add new rack to existing selection
-      setSelectedRackIds((prev) => [...prev, newRackId]);
-    }
-  };
+    setRacks((prevRacks) => {
+      const nextNum = prevRacks.length + 1;
+      let activeRow = rows.find((r) => r.id === selectedRowId) || rows[0];
+      const racksInRow = activeRow ? prevRacks.filter((r) => r.rowId === activeRow.id) : [];
+
+      let newX = 0;
+      let newY = activeRow ? activeRow.rowIndex : 2;
+
+      if (racksInRow.length > 0) {
+        const maxGridX = Math.max(...racksInRow.map((r) => (r.gridX !== undefined ? r.gridX : 0)));
+        newX = Math.min(15, maxGridX + 1);
+        newY = racksInRow[0].gridY !== undefined ? racksInRow[0].gridY : newY;
+      } else {
+        newX = 0;
+      }
+
+      const newRack = {
+        id: newRackId,
+        name: `Rack ${nextNum}`,
+        rowId: activeRow ? activeRow.id : null,
+        gridX: newX,
+        gridY: newY,
+        totalU: 42,
+        items: [],
+      };
+
+      return [...prevRacks, newRack];
+    });
+
+    setSelectedRackIds((prevSelected) => {
+      if (prevSelected.length === 0) return [];
+      if (prevSelected.length === 1) return [newRackId];
+      return [...prevSelected, newRackId];
+    });
+  }, [rows, selectedRowId]);
 
   // Total switches count across all racks
-  const totalItemsCount = racks.reduce((acc, r) => acc + r.items.length, 0);
+  const totalItemsCount = useMemo(() => {
+    return racks.reduce((acc, r) => acc + r.items.length, 0);
+  }, [racks]);
 
-  // Collect all switch items across all racks for modals
-  const allRackItems = racks.flatMap((r) => r.items);
+  // Memoized switch items for modals
+  const allRackItems = useMemo(() => {
+    return racks.flatMap((r) => r.items);
+  }, [racks]);
+
+  // Memoized visible racks for 3D view (Filters strictly by selectedRowId)
+  const visible3DRacks = useMemo(() => {
+    return selectedRowId === 'ALL'
+      ? racks
+      : racks.filter((r) => r.rowId === selectedRowId);
+  }, [racks, selectedRowId]);
 
   // Port click handler
   const handlePortClick = (portObj, fullPortId) => {
@@ -198,7 +259,7 @@ export default function App() {
   // Export Rack state to JSON file
   const handleExportJSON = () => {
     const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(
-      JSON.stringify({ racks, cableConnections }, null, 2)
+      JSON.stringify({ rows, racks, cableConnections }, null, 2)
     );
     const downloadAnchor = document.createElement('a');
     downloadAnchor.setAttribute('href', dataStr);
@@ -216,6 +277,7 @@ export default function App() {
       fileReader.onload = (event) => {
         try {
           const parsed = JSON.parse(event.target.result);
+          if (parsed.rows) setRows(parsed.rows);
           if (parsed.racks) setRacks(parsed.racks);
           else if (parsed.rackItems) {
             setRacks([{ id: 'rack-1', name: 'Rack 1', totalU: 42, items: parsed.rackItems }]);
@@ -233,11 +295,16 @@ export default function App() {
       {/* Header Bar */}
       <Header
         racks={racks}
+        rows={rows}
+        selectedRowId={selectedRowId}
+        onSelectRow={handleSelectRow}
         selectedRackIds={selectedRackIds}
         onSelectRack={handleSelectRack}
         onAddRack={handleAddRack}
         currentView={viewPreset}
         onSelectView={setViewPreset}
+        mainViewMode={mainViewMode}
+        onChangeMainViewMode={setMainViewMode}
         onOpenBOM={() => setBomModalOpen(true)}
         onExportJSON={handleExportJSON}
         onImportJSON={handleImportJSON}
@@ -255,41 +322,61 @@ export default function App() {
       {/* Main Viewport + Sidebar */}
       <div className="main-layout">
         <div className="canvas-wrapper">
-          <CanvasContainer
-            racks={racks}
-            selectedRackIds={selectedRackIds}
-            onSelectRack={handleSelectRack}
-            selectedDeviceId={selectedDeviceId}
-            selectedPortId={selectedPort ? `${portModalDeviceId}:${selectedPort.id}` : null}
-            cableSourcePortId={cableSourcePortId}
-            onSelectDevice={(id) => setSelectedDeviceId(id)}
-            onPortClick={handlePortClick}
-            onPortHover={(p) => {}}
-            doorOpen={doorOpen}
-            cabinetLightColor={cabinetLightColor}
-            cableConnections={cableConnections}
-            viewPreset={viewPreset}
-          />
+          {mainViewMode === 'ELEVATION' ? (
+            <CanvasContainer
+              racks={visible3DRacks}
+              selectedRackIds={selectedRackIds}
+              onSelectRack={handleSelectRack}
+              selectedDeviceId={selectedDeviceId}
+              selectedPortId={selectedPort ? `${portModalDeviceId}:${selectedPort.id}` : null}
+              cableSourcePortId={cableSourcePortId}
+              onSelectDevice={(id) => setSelectedDeviceId(id)}
+              onPortClick={handlePortClick}
+              onPortHover={(p) => {}}
+              doorOpen={doorOpen}
+              cabinetLightColor={cabinetLightColor}
+              cableConnections={cableConnections}
+              viewPreset={viewPreset}
+            />
+          ) : (
+            <FloorPlanContainer
+              racks={racks}
+              setRacks={setRacks}
+              rows={rows}
+              setRows={setRows}
+              selectedRackIds={selectedRackIds}
+              onSelectRack={handleSelectRack}
+              onAddRack={handleAddRack}
+              onSwitchToElevation={() => setMainViewMode('ELEVATION')}
+              selectedRowId={selectedRowId}
+              onSelectRow={handleSelectRow}
+            />
+          )}
         </div>
 
-        {/* Sidebar Controls */}
-        <Sidebar
-          racks={racks}
-          setRacks={setRacks}
-          selectedRackIds={selectedRackIds}
-          onSelectRack={handleSelectRack}
-          onAddRack={handleAddRack}
-          selectedDeviceId={selectedDeviceId}
-          onSelectDevice={setSelectedDeviceId}
-          doorOpen={doorOpen}
-          setDoorOpen={setDoorOpen}
-          cabinetLightColor={cabinetLightColor}
-          setCabinetLightColor={setCabinetLightColor}
-          cableConnections={cableConnections}
-          setCableConnections={setCableConnections}
-          activeCableColor={activeCableColor}
-          setActiveCableColor={setActiveCableColor}
-        />
+        {/* Sidebar Controls - Only rendered in 3D Elevation View */}
+        {mainViewMode === 'ELEVATION' && (
+          <Sidebar
+            racks={racks}
+            setRacks={setRacks}
+            rows={rows}
+            setRows={setRows}
+            selectedRackIds={selectedRackIds}
+            onSelectRack={handleSelectRack}
+            onAddRack={handleAddRack}
+            selectedDeviceId={selectedDeviceId}
+            onSelectDevice={setSelectedDeviceId}
+            doorOpen={doorOpen}
+            setDoorOpen={setDoorOpen}
+            cabinetLightColor={cabinetLightColor}
+            setCabinetLightColor={setCabinetLightColor}
+            cableConnections={cableConnections}
+            setCableConnections={setCableConnections}
+            activeCableColor={activeCableColor}
+            setActiveCableColor={setActiveCableColor}
+            mainViewMode={mainViewMode}
+          />
+        )}
       </div>
 
       {/* Modals */}

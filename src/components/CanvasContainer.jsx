@@ -35,13 +35,16 @@ export function CanvasContainer({
   const visibleRacksRef = useRef(visibleRacks);
   visibleRacksRef.current = visibleRacks;
 
-  // Smoothly pan camera when selectedRackIds or viewPreset changes
+  // Track active visible rack IDs key to prevent internal item moves from resetting camera
+  const visibleRackIdsKey = visibleRacks.map((r) => r.id).join(',');
+
+  // Smoothly pan camera ONLY when viewPreset, selectedRackIds, or visible rack IDs change
   useEffect(() => {
     if (!controlsRef.current) return;
     const controls = controlsRef.current;
 
     const currentVisible = visibleRacksRef.current;
-    const centerX = ((currentVisible.length - 1) * RACK_SPACING_X) / 2;
+    const centerX = currentVisible.length > 0 ? ((currentVisible.length - 1) * RACK_SPACING_X) / 2 : 0;
 
     if (viewPreset === 'FRONT') {
       controls.object.position.set(centerX, 0, 3.5);
@@ -63,7 +66,7 @@ export function CanvasContainer({
       controls.target.set(centerX, 0, 0);
     }
     controls.update();
-  }, [viewPreset, selectedRackIds, isOverviewMode]);
+  }, [viewPreset, selectedRackIds, isOverviewMode, visibleRackIdsKey]);
 
   return (
     <div style={{ width: '100%', height: '100%', position: 'relative' }}>

@@ -477,9 +477,6 @@ export function Sidebar({
                 <div>
                   <div className="rack-title-row">
                     <h3>{activeRack?.name} ({activeTotalU}U)</h3>
-                    <button className="back-rack-btn" onClick={() => onSelectRack(null)} title="Back to All Racks Overview">
-                      <LayoutGrid size={12} /> Overview
-                    </button>
                   </div>
                   <p className="tab-desc">
                     {selectedRackIds.length > 1
