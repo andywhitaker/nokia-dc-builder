@@ -133,14 +133,12 @@ export const Rack3D = React.memo(function Rack3D({
         <group position={[0, 0.06 + rackBodyH / 2, halfD + 0.005]} raycast={noRaycast}>
           <mesh position={[0, 0, 0]}>
             <boxGeometry args={[rackW - 0.01, rackBodyH, 0.006]} />
-            <meshPhysicalMaterial
+            <meshStandardMaterial
               color="#0f172a"
               transparent
               opacity={0.85}
               roughness={0.2}
               metalness={0.8}
-              transmission={0.3}
-              ior={1.5}
             />
           </mesh>
           <mesh position={[halfW - 0.05, 0, 0.006]}>
@@ -162,13 +160,12 @@ export const Rack3D = React.memo(function Rack3D({
       {[-halfW - 0.005, halfW + 0.005].map((panelX, pIdx) => (
         <mesh key={`side-panel-${pIdx}`} position={[panelX, 0.06 + rackBodyH / 2, 0]} raycast={noRaycast}>
           <boxGeometry args={[0.004, rackBodyH - 0.02, rackD - 0.06]} />
-          <meshPhysicalMaterial
+          <meshStandardMaterial
             color="#0f172a"
             transparent
-            opacity={0.3}
-            roughness={0.1}
-            transmission={0.5}
-            ior={1.5}
+            opacity={0.35}
+            roughness={0.2}
+            metalness={0.8}
           />
         </mesh>
       ))}

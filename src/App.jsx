@@ -8,6 +8,7 @@ import { PortModal } from './components/PortModal';
 import { BOMModal } from './components/BOMModal';
 import { ResetConfirmModal } from './components/ResetConfirmModal';
 import { INITIAL_RACK_ITEMS, SWITCH_MODELS } from './data/switchModels';
+import { sortRacksByGridX } from './utils/rackHelpers';
 
 export const CABLE_COLOR_PALETTE = [
   { hex: '#00f0ff', label: 'Cyan (OM3/OM4 100G)' },
@@ -127,6 +128,24 @@ export default function App() {
     }
   }, [rows, selectedRowId, racks, selectedRackIds, cableConnections, activeCableColor, cabinetLightColor]);
 
+  // Auto-remove empty rows that contain '(auto)' in their name
+  useEffect(() => {
+    setRows((prevRows) => {
+      const cleaned = prevRows.filter((rw) => {
+        const isAutoRow = rw.name.includes('(auto)');
+        if (!isAutoRow) return true;
+        const hasRacks = racks.some(
+          (r) => r.rowId === rw.id || r.gridY === rw.rowIndex
+        );
+        return hasRacks;
+      });
+      if (cleaned.length !== prevRows.length) {
+        return cleaned;
+      }
+      return prevRows;
+    });
+  }, [racks]);
+
   // Reset Everything handler
   const handleConfirmResetAll = () => {
     localStorage.removeItem(LOCAL_STORAGE_KEY);
@@ -153,6 +172,12 @@ export default function App() {
   const handleSelectRack = useCallback((rackId, isShiftPressed = false) => {
     if (!rackId) {
       setSelectedRackIds([]);
+      setSelectedDeviceId(null);
+      return;
+    }
+
+    if (Array.isArray(rackId)) {
+      setSelectedRackIds(rackId);
       setSelectedDeviceId(null);
       return;
     }
@@ -225,11 +250,12 @@ export default function App() {
     return racks.flatMap((r) => r.items);
   }, [racks]);
 
-  // Memoized visible racks for 3D view (Filters strictly by selectedRowId)
+  // Memoized visible racks for 3D view (Filters strictly by selectedRowId and sorts left-to-right)
   const visible3DRacks = useMemo(() => {
-    return selectedRowId === 'ALL'
+    const filtered = selectedRowId === 'ALL'
       ? racks
       : racks.filter((r) => r.rowId === selectedRowId);
+    return sortRacksByGridX(filtered);
   }, [racks, selectedRowId]);
 
   // Port click handler
@@ -361,6 +387,7 @@ export default function App() {
             setRacks={setRacks}
             rows={rows}
             setRows={setRows}
+            selectedRowId={selectedRowId}
             selectedRackIds={selectedRackIds}
             onSelectRack={handleSelectRack}
             onAddRack={handleAddRack}

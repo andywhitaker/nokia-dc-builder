@@ -296,3 +296,79 @@ export function reorderRackItemsByDrag(items, draggedId, targetId, totalU = 42) 
 
   return items;
 }
+
+// Sort racks left-to-right matching floor plan layout coordinates
+export function sortRacksByGridX(rackList) {
+  return [...rackList].sort((a, b) => {
+    const ax = a.gridX !== undefined ? a.gridX : 0;
+    const bx = b.gridX !== undefined ? b.gridX : 0;
+    if (ax !== bx) return ax - bx;
+    const ay = a.gridY !== undefined ? a.gridY : 0;
+    const by = b.gridY !== undefined ? b.gridY : 0;
+    if (ay !== by) return ay - by;
+    return a.id.localeCompare(b.id);
+  });
+}
+
+// Re-order racks in a row (e.g. via 3D Elevation Rack Order tab or Sidebar):
+// Shuffles racks into the row's existing floor grid column slots while keeping empty space cells untouched!
+export function reorderRowRacksInSlots(allRacks, targetRackId, newIndexOrDirection) {
+  const targetRack = allRacks.find((r) => r.id === targetRackId);
+  if (!targetRack) return allRacks;
+
+  const targetRowId = targetRack.rowId;
+
+  // Filter all racks belonging to the same row (or unassigned row)
+  const rowRacks = allRacks.filter((r) => r.rowId === targetRowId);
+  if (rowRacks.length <= 1) return allRacks;
+
+  // Sort existing row racks by current floor grid position (gridX)
+  const sortedRowRacks = sortRacksByGridX(rowRacks);
+
+  const currentIndex = sortedRowRacks.findIndex((r) => r.id === targetRackId);
+  if (currentIndex < 0) return allRacks;
+
+  let targetIndex = currentIndex;
+  if (newIndexOrDirection === 'UP' || newIndexOrDirection === 'LEFT') {
+    targetIndex = currentIndex - 1;
+  } else if (newIndexOrDirection === 'DOWN' || newIndexOrDirection === 'RIGHT') {
+    targetIndex = currentIndex + 1;
+  } else if (typeof newIndexOrDirection === 'number') {
+    targetIndex = newIndexOrDirection;
+  }
+
+  if (targetIndex < 0 || targetIndex >= sortedRowRacks.length || targetIndex === currentIndex) {
+    return allRacks;
+  }
+
+  // Reorder the row racks array
+  const reorderedRowRacks = [...sortedRowRacks];
+  const [movedRack] = reorderedRowRacks.splice(currentIndex, 1);
+  reorderedRowRacks.splice(targetIndex, 0, movedRack);
+
+  // Extract the exact grid coordinate slots (gridX, gridY) occupied by this row, sorted by gridX
+  const slots = sortedRowRacks.map((r) => ({
+    gridX: r.gridX !== undefined ? r.gridX : 0,
+    gridY: r.gridY !== undefined ? r.gridY : 2,
+  }));
+
+  // Re-assign each rack in reorderedRowRacks to its corresponding slot
+  const updatedRowRacksMap = new Map();
+  reorderedRowRacks.forEach((rack, idx) => {
+    const slot = slots[idx];
+    updatedRowRacksMap.set(rack.id, {
+      ...rack,
+      gridX: slot.gridX,
+      gridY: slot.gridY,
+    });
+  });
+
+  // Reconstruct allRacks array preserving original array references
+  return allRacks.map((r) => {
+    if (updatedRowRacksMap.has(r.id)) {
+      return updatedRowRacksMap.get(r.id);
+    }
+    return r;
+  });
+}
+

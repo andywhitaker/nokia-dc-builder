@@ -111,15 +111,10 @@ export const FrontPorts3D = React.memo(function FrontPorts3D({
             <group raycast={noRaycast}>
               {/* Glowing Wireframe Frame when Hovered, Selected, or Cable Source */}
               {activeColor && (
-                <group ref={isCableSource ? pulseRef : null} position={[0, 0, 0.002]}>
-                  <lineSegments>
-                    <edgesGeometry
-                      attach="geometry"
-                      args={[new THREE.PlaneGeometry(boxW + 0.002, boxH + 0.002)]}
-                    />
-                    <lineBasicMaterial attach="material" color={activeColor} linewidth={2} />
-                  </lineSegments>
-                </group>
+                <mesh ref={isCableSource ? pulseRef : null} position={[0, 0, 0.002]}>
+                  <boxGeometry args={[boxW + 0.002, boxH + 0.002, 0.0005]} />
+                  <meshBasicMaterial color={activeColor} wireframe transparent opacity={0.9} />
+                </mesh>
               )}
 
               {/* Floating 3D Text Badge */}

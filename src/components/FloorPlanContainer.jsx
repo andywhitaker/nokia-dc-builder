@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Server,
   Trash2,
@@ -32,10 +32,18 @@ export function FloorPlanContainer({
   selectedRowId,
   onSelectRow,
 }) {
+  const matrixRef = useRef(null);
   const [zoomLevel, setZoomLevel] = useState(1);
   const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
   const [isPanning, setIsPanning] = useState(false);
   const [panStart, setPanStart] = useState({ x: 0, y: 0 });
+
+  // Marquee rectangle box selection state
+  const [boxSelect, setBoxSelect] = useState(null);
+
+  // Combine Rows modal selection state
+  const [combineSelectedLabel, setCombineSelectedLabel] = useState('');
+  const [combineCustomName, setCombineCustomName] = useState('');
 
   // Track selection of a row corridor label
   const [selectedCorridorRowId, setSelectedCorridorRowId] = useState(null);
@@ -79,7 +87,7 @@ export function FloorPlanContainer({
     };
   }, []);
 
-  // Handle Canvas Panning with text selection prevention
+  // Handle Canvas Panning & Shift+Drag Marquee Rectangle Selection
   const handleCanvasMouseDown = (e) => {
     if (
       e.target.closest('.rack-square-tile') ||
@@ -91,14 +99,74 @@ export function FloorPlanContainer({
     ) {
       return;
     }
-    // Deselect corridor row if clicking empty background
+    // Deselect corridor row and selected racks if clicking empty background
     setSelectedCorridorRowId(null);
-    e.preventDefault(); // Prevent browser text selection during panning
-    setIsPanning(true);
-    setPanStart({ x: e.clientX - panOffset.x, y: e.clientY - panOffset.y });
+    onSelectRack(null);
+    e.preventDefault(); // Prevent browser text selection
+
+    if (e.shiftKey) {
+      // Start Marquee Rectangle Box Selection!
+      if (matrixRef.current) {
+        const rect = matrixRef.current.getBoundingClientRect();
+        const localX = (e.clientX - rect.left) / zoomLevel;
+        const localY = (e.clientY - rect.top) / zoomLevel;
+        setBoxSelect({
+          startX: localX,
+          startY: localY,
+          currentX: localX,
+          currentY: localY,
+          startClientX: e.clientX,
+          startClientY: e.clientY,
+        });
+      }
+    } else {
+      setIsPanning(true);
+      setPanStart({ x: e.clientX - panOffset.x, y: e.clientY - panOffset.y });
+    }
   };
 
   const handleCanvasMouseMove = (e) => {
+    if (boxSelect) {
+      if (matrixRef.current) {
+        const rect = matrixRef.current.getBoundingClientRect();
+        const localX = (e.clientX - rect.left) / zoomLevel;
+        const localY = (e.clientY - rect.top) / zoomLevel;
+
+        const startClientX = boxSelect.startClientX;
+        const startClientY = boxSelect.startClientY;
+
+        setBoxSelect((prev) =>
+          prev ? { ...prev, currentX: localX, currentY: localY } : null
+        );
+
+        // Calculate intersecting rack tiles using screen bounding rects
+        const minX = Math.min(startClientX, e.clientX);
+        const maxX = Math.max(startClientX, e.clientX);
+        const minY = Math.min(startClientY, e.clientY);
+        const maxY = Math.max(startClientY, e.clientY);
+
+        const matchedIds = [];
+        racks.forEach((r) => {
+          const tileEl = document.getElementById(`rack-tile-${r.id}`);
+          if (tileEl) {
+            const tRect = tileEl.getBoundingClientRect();
+            const intersects = !(
+              tRect.right < minX ||
+              tRect.left > maxX ||
+              tRect.bottom < minY ||
+              tRect.top > maxY
+            );
+            if (intersects) {
+              matchedIds.push(r.id);
+            }
+          }
+        });
+
+        onSelectRack(matchedIds);
+      }
+      return;
+    }
+
     if (!isPanning) return;
     setPanOffset({
       x: e.clientX - panStart.x,
@@ -107,6 +175,9 @@ export function FloorPlanContainer({
   };
 
   const handleCanvasMouseUp = () => {
+    if (boxSelect) {
+      setBoxSelect(null);
+    }
     setIsPanning(false);
   };
 
@@ -295,12 +366,61 @@ export function FloorPlanContainer({
           prev.map((r) => (r.gridY === targetIdx ? { ...r, rowId: rowId } : r))
         );
       }
+    } else if (type === 'COMBINE_ROWS') {
+      const { sourceRowObj, targetRowObj, targetRowIndex } = modalState;
+      if (!sourceRowObj || !targetRowObj) return;
+
+      const finalName =
+        combineSelectedLabel === 'CUSTOM'
+          ? combineCustomName.trim() || 'Combined Row'
+          : combineSelectedLabel;
+
+      // Update target row with final name and remove source row definition
+      setRows((prev) =>
+        prev
+          .filter((rw) => rw.id !== sourceRowObj.id)
+          .map((rw) =>
+            rw.id === targetRowObj.id
+              ? { ...rw, name: finalName, rowIndex: targetRowIndex }
+              : rw
+          )
+      );
+
+      // Consolidate all racks from both rows to targetRowObj.id at targetRowIndex
+      setRacks((prevRacks) => {
+        const mergedRacks = prevRacks.map((r) => {
+          const isFromSource =
+            r.rowId === sourceRowObj.id || r.gridY === sourceRowObj.rowIndex;
+          const isFromTarget =
+            r.rowId === targetRowObj.id || r.gridY === targetRowObj.rowIndex;
+          if (isFromSource || isFromTarget) {
+            return { ...r, rowId: targetRowObj.id, gridY: targetRowIndex };
+          }
+          return r;
+        });
+
+        // Ensure unique gridX positions for all consolidated racks on targetRowIndex
+        const occupiedSlots = new Set();
+        return mergedRacks.map((r) => {
+          if (r.gridY !== targetRowIndex) return r;
+          let newX = r.gridX !== undefined ? r.gridX : 0;
+          while (occupiedSlots.has(newX) && newX < GRID_COLS) {
+            newX++;
+          }
+          occupiedSlots.add(newX);
+          return { ...r, gridX: newX };
+        });
+      });
+
+      if (selectedCorridorRowId === sourceRowObj.id) {
+        setSelectedCorridorRowId(targetRowObj.id);
+      }
     }
 
     setModalState({ isOpen: false });
   };
 
-  // SHIFT+CLICK on empty grid cell to add a Rack directly at (col, row)
+  // CLICK on grid cell (or SHIFT+CLICK on empty grid cell to add a Rack)
   const handleCellClick = (e, col, row) => {
     if (e.shiftKey) {
       e.preventDefault();
@@ -309,14 +429,32 @@ export function FloorPlanContainer({
       const isOccupied = racks.some((r) => r.gridX === col && r.gridY === row);
       if (isOccupied) return;
 
+      let targetRowDef = rows.find((rw) => rw.rowIndex === row);
+      let targetRowId = targetRowDef ? targetRowDef.id : null;
+
+      if (!targetRowDef) {
+        const newRowId = `row-auto-${Date.now().toString().slice(-4)}`;
+        const colors = ['#00f0ff', '#005aff', '#a855f7', '#10b981', '#f59e0b', '#ec4899'];
+        const rowColor = colors[row % colors.length];
+        const rowLetter = String.fromCharCode(65 + (row % 26));
+        const autoRow = {
+          id: newRowId,
+          name: `Row ${rowLetter} (auto)`,
+          color: rowColor,
+          rowIndex: row,
+          isAuto: true,
+        };
+        setRows((prev) => [...prev, autoRow]);
+        targetRowId = newRowId;
+      }
+
       const nextNum = racks.length + 1;
       const newRackId = `rack-${Date.now().toString().slice(-4)}`;
-      const targetRowDef = rows.find((rw) => rw.rowIndex === row);
 
       const newRack = {
         id: newRackId,
         name: `Rack ${nextNum}`,
-        rowId: targetRowDef ? targetRowDef.id : null,
+        rowId: targetRowId,
         gridX: col,
         gridY: row,
         totalU: 42,
@@ -324,6 +462,17 @@ export function FloorPlanContainer({
       };
 
       setRacks((prev) => [...prev, newRack]);
+    } else {
+      // Normal click on an empty grid cell -> deselect any selected racks or rows!
+      const rackAtCell = racks.find(
+        (r) =>
+          (r.gridX === col && r.gridY === row) ||
+          (!r.gridX && r.gridX !== 0 && row === 1 && col === racks.indexOf(r))
+      );
+      if (!rackAtCell) {
+        onSelectRack(null);
+        setSelectedCorridorRowId(null);
+      }
     }
   };
 
@@ -346,6 +495,32 @@ export function FloorPlanContainer({
     }
   };
 
+  // Projected cell targets for all selected group members during drag
+  const groupProjectedCells = React.useMemo(() => {
+    if (!draggedRackId || !hoveredCell) return [];
+
+    const draggedRack = racks.find((r) => r.id === draggedRackId);
+    if (!draggedRack) return [];
+
+    const isGroupDrag = selectedRackIds.includes(draggedRackId) && selectedRackIds.length > 1;
+    const targetRacks = isGroupDrag
+      ? racks.filter((r) => selectedRackIds.includes(r.id))
+      : [draggedRack];
+
+    const deltaX = hoveredCell.col - draggedRack.gridX;
+    const deltaY = hoveredCell.row - draggedRack.gridY;
+
+    return targetRacks.map((r) => ({
+      rackId: r.id,
+      rackName: r.name,
+      totalU: r.totalU || 42,
+      itemsCount: r.items.length,
+      col: r.gridX + deltaX,
+      row: r.gridY + deltaY,
+      isPrimary: r.id === draggedRackId,
+    }));
+  }, [draggedRackId, hoveredCell, selectedRackIds, racks]);
+
   // Drag and drop rack tile on floor grid
   const handleTileDragStart = (e, rackId) => {
     e.stopPropagation();
@@ -353,6 +528,16 @@ export function FloorPlanContainer({
     setDraggedRowId(null);
     e.dataTransfer.effectAllowed = 'move';
     e.dataTransfer.setData('text/plain', rackId);
+
+    // If dragging an unselected rack, select it
+    if (!selectedRackIds.includes(rackId)) {
+      onSelectRack(rackId, false);
+    }
+  };
+
+  const handleTileDragEnd = () => {
+    setDraggedRackId(null);
+    setHoveredCell(null);
   };
 
   // Drag named row label directly inside the viewport corridor up or down
@@ -389,23 +574,41 @@ export function FloorPlanContainer({
 
     // Case 1: Dragging a Row label tag to a target row index
     if (draggedRowId) {
-      const rowObj = rows.find((r) => r.id === draggedRowId);
+      const sourceRowObj = rows.find((r) => r.id === draggedRowId);
       setDraggedRowId(null);
 
-      if (!rowObj) return;
+      if (!sourceRowObj) return;
 
-      const deltaY = targetRow - rowObj.rowIndex;
+      const existingRowOnTarget = rows.find(
+        (rw) => rw.rowIndex === targetRow && rw.id !== sourceRowObj.id
+      );
+
+      if (existingRowOnTarget) {
+        // Trigger Combine Rows Modal!
+        openModal({
+          type: 'COMBINE_ROWS',
+          title: 'Combine Data Center Rows?',
+          sourceRowObj,
+          targetRowObj: existingRowOnTarget,
+          targetRowIndex: targetRow,
+        });
+        setCombineSelectedLabel(sourceRowObj.name);
+        setCombineCustomName('');
+        return;
+      }
+
+      const deltaY = targetRow - sourceRowObj.rowIndex;
       if (deltaY === 0) return;
 
       // Update row definition index
       setRows((prev) =>
-        prev.map((rw) => (rw.id === rowObj.id ? { ...rw, rowIndex: targetRow } : rw))
+        prev.map((rw) => (rw.id === sourceRowObj.id ? { ...rw, rowIndex: targetRow } : rw))
       );
 
       // Move ALL racks assigned to this row along with it!
       setRacks((prev) =>
         prev.map((r) => {
-          if (r.rowId !== rowObj.id) return r;
+          if (r.rowId !== sourceRowObj.id) return r;
           const newGridY = Math.max(0, Math.min(GRID_ROWS - 1, r.gridY + deltaY));
           return { ...r, gridY: newGridY };
         })
@@ -413,34 +616,124 @@ export function FloorPlanContainer({
       return;
     }
 
-    // Case 2: Dragging an individual Rack tile to a target cell
+    // Case 2: Dragging a Rack tile (or multi-selected group) to a target cell
     const rackId = draggedRackId || e.dataTransfer.getData('text/plain');
     setDraggedRackId(null);
 
     if (!rackId) return;
 
-    // Check if cell is occupied by another rack
-    const isOccupied = racks.some(
-      (r) => r.id !== rackId && r.gridX === targetCol && r.gridY === targetRow
-    );
+    const draggedRack = racks.find((r) => r.id === rackId);
+    if (!draggedRack) return;
 
-    if (isOccupied) return;
+    const isGroupDrag = selectedRackIds.includes(rackId) && selectedRackIds.length > 1;
 
-    // Find if target row matches a named row
-    const targetRowDef = rows.find((rw) => rw.rowIndex === targetRow);
+    if (isGroupDrag) {
+      const groupRacks = racks.filter((r) => selectedRackIds.includes(r.id));
+      const deltaX = targetCol - draggedRack.gridX;
+      const deltaY = targetRow - draggedRack.gridY;
 
-    // Update rack position and automatically bind to row if target row is named
-    setRacks((prev) =>
-      prev.map((r) => {
-        if (r.id !== rackId) return r;
-        return {
-          ...r,
-          gridX: targetCol,
-          gridY: targetRow,
-          rowId: targetRowDef ? targetRowDef.id : r.rowId,
+      if (deltaX === 0 && deltaY === 0) return;
+
+      const proposed = groupRacks.map((r) => ({
+        rack: r,
+        newX: r.gridX + deltaX,
+        newY: r.gridY + deltaY,
+      }));
+
+      // Validation 1: Grid Bounds Check
+      const isOutOfBounds = proposed.some(
+        (p) => p.newX < 0 || p.newX >= GRID_COLS || p.newY < 0 || p.newY >= GRID_ROWS
+      );
+      if (isOutOfBounds) return; // Cancel invalid group move!
+
+      // Validation 2: Collision Check with unselected racks
+      const unselectedRacks = racks.filter((r) => !selectedRackIds.includes(r.id));
+      const isColliding = proposed.some((p) =>
+        unselectedRacks.some((ur) => ur.gridX === p.newX && ur.gridY === p.newY)
+      );
+      if (isColliding) return; // Cancel invalid group move!
+
+      // Apply Group Move + Auto-Create Rows if needed
+      let updatedRows = [...rows];
+      const posMap = new Map();
+
+      proposed.forEach((p) => {
+        let rowDef = updatedRows.find((rw) => rw.rowIndex === p.newY);
+        let targetRowId = rowDef ? rowDef.id : null;
+
+        if (!rowDef) {
+          const newRowId = `row-auto-${Date.now().toString().slice(-4)}-${p.newY}`;
+          const colors = ['#00f0ff', '#005aff', '#a855f7', '#10b981', '#f59e0b', '#ec4899'];
+          const rowColor = colors[p.newY % colors.length];
+          const rowLetter = String.fromCharCode(65 + (p.newY % 26));
+          rowDef = {
+            id: newRowId,
+            name: `Row ${rowLetter} (auto)`,
+            color: rowColor,
+            rowIndex: p.newY,
+            isAuto: true,
+          };
+          updatedRows.push(rowDef);
+          targetRowId = newRowId;
+        }
+
+        posMap.set(p.rack.id, {
+          gridX: p.newX,
+          gridY: p.newY,
+          rowId: targetRowId,
+        });
+      });
+
+      if (updatedRows.length !== rows.length) {
+        setRows(updatedRows);
+      }
+
+      setRacks((prev) =>
+        prev.map((r) => {
+          if (posMap.has(r.id)) {
+            return { ...r, ...posMap.get(r.id) };
+          }
+          return r;
+        })
+      );
+    } else {
+      // Single rack drag logic
+      const isOccupied = racks.some(
+        (r) => r.id !== rackId && r.gridX === targetCol && r.gridY === targetRow
+      );
+      if (isOccupied) return;
+
+      let targetRowDef = rows.find((rw) => rw.rowIndex === targetRow);
+      let targetRowId = targetRowDef ? targetRowDef.id : null;
+
+      if (!targetRowDef) {
+        const newRowId = `row-auto-${Date.now().toString().slice(-4)}`;
+        const colors = ['#00f0ff', '#005aff', '#a855f7', '#10b981', '#f59e0b', '#ec4899'];
+        const rowColor = colors[targetRow % colors.length];
+        const rowLetter = String.fromCharCode(65 + (targetRow % 26));
+        const autoRow = {
+          id: newRowId,
+          name: `Row ${rowLetter} (auto)`,
+          color: rowColor,
+          rowIndex: targetRow,
+          isAuto: true,
         };
-      })
-    );
+        setRows((prev) => [...prev, autoRow]);
+        targetRowId = newRowId;
+      }
+
+      setRacks((prev) =>
+        prev.map((r) => {
+          if (r.id !== rackId) return r;
+          return {
+            ...r,
+            gridX: targetCol,
+            gridY: targetRow,
+            rowId: targetRowId,
+          };
+        })
+      );
+    }
   };
 
   // App-Native Modal Triggers for Toolbar Actions
@@ -709,11 +1002,25 @@ export function FloorPlanContainer({
       >
         <div
           className="floor-grid-matrix"
+          ref={matrixRef}
           style={{
             transform: `translate(${panOffset.x}px, ${panOffset.y}px) scale(${zoomLevel})`,
             transformOrigin: 'top left',
           }}
         >
+          {/* Render Marquee Selection Box Overlay */}
+          {boxSelect && (
+            <div
+              className="box-selection-marquee"
+              style={{
+                left: Math.min(boxSelect.startX, boxSelect.currentX),
+                top: Math.min(boxSelect.startY, boxSelect.currentY),
+                width: Math.abs(boxSelect.currentX - boxSelect.startX),
+                height: Math.abs(boxSelect.currentY - boxSelect.startY),
+              }}
+            />
+          )}
+
           {/* Render Grid Rows and Cells */}
           {Array.from({ length: GRID_ROWS }).map((_, rIdx) => {
             // Find if any named row is mapped to this row index
@@ -767,10 +1074,18 @@ export function FloorPlanContainer({
                     hoveredCell && hoveredCell.col === cIdx && hoveredCell.row === rIdx;
                   const isSelected = rackAtCell && selectedRackIds.includes(rackAtCell.id);
 
+                  // Find projected target entry for multi-rack floating drag preview
+                  const projectedTile = groupProjectedCells.find(
+                    (p) => p.col === cIdx && p.row === rIdx
+                  );
+
+                  const isGroupMemberDragging =
+                    draggedRackId && rackAtCell && selectedRackIds.includes(rackAtCell.id);
+
                   return (
                     <div
                       key={`cell-${rIdx}-${cIdx}`}
-                      className={`floor-tile-cell ${isHovered ? 'hover-cell' : ''}`}
+                      className={`floor-tile-cell ${isHovered ? 'hover-cell' : ''} ${projectedTile ? 'group-projected-cell' : ''}`}
                       onClick={(e) => handleCellClick(e, cIdx, rIdx)}
                       onDragOver={(e) => handleCellDragOver(e, cIdx, rIdx)}
                       onDragLeave={() => setHoveredCell(null)}
@@ -779,13 +1094,31 @@ export function FloorPlanContainer({
                     >
                       <span className="cell-coord">{cIdx + 1}</span>
 
+                      {/* Render Projected Floating Drag Ghost Tile */}
+                      {projectedTile && (
+                        <div
+                          className={`floating-drag-preview-tile ${projectedTile.isPrimary ? 'primary-drag' : ''}`}
+                        >
+                          <div className="tile-top-bar">
+                            <Server size={14} className="tile-icon" />
+                            <span className="tile-name">{projectedTile.rackName}</span>
+                          </div>
+                          <div className="tile-info">
+                            <span className="tile-u">{projectedTile.totalU}U</span>
+                            <span className="tile-switches">{projectedTile.itemsCount} Switches</span>
+                          </div>
+                        </div>
+                      )}
+
                       {/* Render Rack Square Tile if present */}
                       {rackAtCell && (
                         <div
+                          id={`rack-tile-${rackAtCell.id}`}
                           draggable
                           onDragStart={(e) => handleTileDragStart(e, rackAtCell.id)}
+                          onDragEnd={handleTileDragEnd}
                           onContextMenu={(e) => handleRackContextMenu(e, rackAtCell)}
-                          className={`rack-square-tile ${isSelected ? 'selected' : ''}`}
+                          className={`rack-square-tile ${isSelected ? 'selected' : ''} ${isGroupMemberDragging ? 'is-group-dragging' : ''}`}
                           onClick={(e) => {
                             e.stopPropagation();
                             setSelectedCorridorRowId(null);
@@ -959,6 +1292,49 @@ export function FloorPlanContainer({
                   <p className="delete-subtext">This action cannot be undone.</p>
                 </div>
               )}
+
+              {/* COMBINE ROWS FORM */}
+              {modalState.type === 'COMBINE_ROWS' && (
+                <div className="native-modal-form">
+                  <p className="delete-message-text">
+                    Do you want to combine <strong>"{modalState.sourceRowObj?.name}"</strong> and <strong>"{modalState.targetRowObj?.name}"</strong> into a single row at Row {modalState.targetRowIndex + 1}?
+                  </p>
+
+                  <div style={{ marginTop: '12px' }}>
+                    <label className="native-modal-label">Choose Row Label Name:</label>
+                    <select
+                      className="native-modal-input"
+                      style={{ marginTop: '6px' }}
+                      value={combineSelectedLabel}
+                      onChange={(e) => setCombineSelectedLabel(e.target.value)}
+                    >
+                      <option value={modalState.sourceRowObj?.name}>
+                        {modalState.sourceRowObj?.name}
+                      </option>
+                      <option value={modalState.targetRowObj?.name}>
+                        {modalState.targetRowObj?.name}
+                      </option>
+                      <option value="CUSTOM">Custom...</option>
+                    </select>
+                  </div>
+
+                  {combineSelectedLabel === 'CUSTOM' && (
+                    <div style={{ marginTop: '12px' }}>
+                      <label className="native-modal-label">Enter Custom Row Name:</label>
+                      <input
+                        type="text"
+                        className="native-modal-input"
+                        style={{ marginTop: '6px' }}
+                        placeholder="e.g. Row A-B"
+                        value={combineCustomName}
+                        onChange={(e) => setCombineCustomName(e.target.value)}
+                        onKeyDown={(e) => e.key === 'Enter' && handleModalSubmit()}
+                        autoFocus
+                      />
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
             <div className="modal-footer">
@@ -969,6 +1345,10 @@ export function FloorPlanContainer({
               {modalState.type === 'DELETE_CONFIRM' ? (
                 <button className="sm-btn danger-confirm" onClick={handleModalSubmit}>
                   <Trash2 size={14} /> Delete Immediately
+                </button>
+              ) : modalState.type === 'COMBINE_ROWS' ? (
+                <button className="sm-btn primary-confirm" onClick={handleModalSubmit}>
+                  Combine Rows
                 </button>
               ) : (
                 <button className="sm-btn primary-confirm" onClick={handleModalSubmit}>

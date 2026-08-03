@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   Plus,
   ArrowUp,
@@ -25,11 +25,16 @@ import {
   checkRackCollision,
   reorderRackItemsByDrag,
   resizeRackTotalU,
+  sortRacksByGridX,
+  reorderRowRacksInSlots,
 } from '../utils/rackHelpers';
 
 export function Sidebar({
   racks,
   setRacks,
+  rows = [],
+  setRows,
+  selectedRowId,
   selectedRackIds = [],
   onSelectRack,
   onAddRack,
@@ -79,8 +84,20 @@ export function Sidebar({
   const [draggedItemId, setDraggedItemId] = useState(null);
   const [dragOverItemId, setDragOverItemId] = useState(null);
 
+  // Drag and Drop states for rack cards in Overview mode
+  const [draggedRackCardId, setDraggedRackCardId] = useState(null);
+  const [dragOverRackCardId, setDragOverRackCardId] = useState(null);
+
   // Track recent swapped card IDs for animation feedback
   const [swappedCardIds, setSwappedCardIds] = useState([]);
+
+  // Compute displayed racks for current row, sorted left-to-right matching floor grid coordinates
+  const displayRacks = useMemo(() => {
+    const list = selectedRowId && selectedRowId !== 'ALL'
+      ? racks.filter((r) => r.rowId === selectedRowId)
+      : racks;
+    return sortRacksByGridX(list);
+  }, [racks, selectedRowId]);
 
   const showNotification = (msg, type = 'SUCCESS') => {
     setNotification({ message: msg, type });
@@ -126,20 +143,42 @@ export function Sidebar({
     showNotification(`Updated ${activeRack?.name} capacity to ${newTotalU}U!`, 'SUCCESS');
   };
 
-  // Move Rack left/right in row order
+  // Move Rack left/right in row order, shuffling grid positions on the floor layout!
   const handleMoveRack = (rackId, dir) => {
-    const idx = racks.findIndex((r) => r.id === rackId);
-    if (idx < 0) return;
+    const updated = reorderRowRacksInSlots(racks, rackId, dir);
+    setRacks(updated);
+    showNotification('Reordered data center racks on floor layout', 'SUCCESS');
+  };
 
-    const newIdx = dir === 'LEFT' ? idx - 1 : idx + 1;
-    if (newIdx < 0 || newIdx >= racks.length) return;
+  // Drag and Drop handlers for Rack cards in Overview mode
+  const handleRackCardDragStart = (e, rackId) => {
+    setDraggedRackCardId(rackId);
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', rackId);
+  };
 
-    const copy = [...racks];
-    const temp = copy[idx];
-    copy[idx] = copy[newIdx];
-    copy[newIdx] = temp;
-    setRacks(copy);
-    showNotification('Reordered data center racks in row', 'SUCCESS');
+  const handleRackCardDragOver = (e, rackId) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    if (dragOverRackCardId !== rackId) {
+      setDragOverRackCardId(rackId);
+    }
+  };
+
+  const handleRackCardDrop = (e, targetRackId) => {
+    e.preventDefault();
+    const id = draggedRackCardId || e.dataTransfer.getData('text/plain');
+    setDraggedRackCardId(null);
+    setDragOverRackCardId(null);
+
+    if (!id || id === targetRackId) return;
+
+    const targetIdx = displayRacks.findIndex((r) => r.id === targetRackId);
+    if (targetIdx >= 0) {
+      const updated = reorderRowRacksInSlots(racks, id, targetIdx);
+      setRacks(updated);
+      showNotification('Reordered data center racks on floor layout', 'SUCCESS');
+    }
   };
 
   // Save renamed rack name
@@ -381,7 +420,7 @@ export function Sidebar({
               <div className="tab-header">
                 <div>
                   <h3>Data Center Overview (Closed Cabinets)</h3>
-                  <p className="tab-desc">Shift-Click rack badges above to select multiple racks for cross-rack cabling!</p>
+                  <p className="tab-desc">Drag or use arrows to re-order racks on the floor plan layout.</p>
                 </div>
                 <button className="sm-btn" onClick={onAddRack} title="Add new rack frame">
                   + Add Rack
@@ -389,22 +428,29 @@ export function Sidebar({
               </div>
 
               <div className="elevation-list">
-                {racks.map((r, rIdx) => {
+                {displayRacks.map((r, rIdx) => {
                   const totalUUsed = r.items.reduce((acc, it) => {
                     const m = SWITCH_MODELS[it.modelId] || { heightU: 1 };
                     return acc + (m.heightU || 1);
                   }, 0);
                   const isEditingRack = editingRackId === r.id;
                   const rackMaxU = r.totalU || 42;
+                  const isDraggingRackCard = draggedRackCardId === r.id;
+                  const isDragOverRackCard = dragOverRackCardId === r.id;
 
                   return (
                     <div
                       key={r.id}
-                      className="elevation-card rack-row-card"
+                      draggable={true}
+                      onDragStart={(e) => handleRackCardDragStart(e, r.id)}
+                      onDragOver={(e) => handleRackCardDragOver(e, r.id)}
+                      onDragLeave={() => setDragOverRackCardId(null)}
+                      onDrop={(e) => handleRackCardDrop(e, r.id)}
+                      className={`elevation-card rack-row-card ${isDraggingRackCard ? 'dragging' : ''} ${isDragOverRackCard ? 'drag-over' : ''}`}
                       onClick={(e) => onSelectRack(r.id, e.shiftKey)}
                     >
-                      <div className="drag-handle" title="Position in Data Center Row">
-                        <Server size={16} className="drag-icon" />
+                      <div className="drag-handle" title="Drag to re-order rack in row">
+                        <GripVertical size={16} className="drag-icon" />
                       </div>
 
                       <div className="card-info" onClick={(e) => e.stopPropagation()}>
@@ -444,16 +490,16 @@ export function Sidebar({
                         <button
                           className="reorder-btn"
                           disabled={rIdx === 0}
-                          onClick={() => handleMoveRack(r.id, 'LEFT')}
-                          title="Move Rack Left"
+                          onClick={() => handleMoveRack(r.id, 'UP')}
+                          title="Move Rack Left in Row"
                         >
                           <ArrowUp size={13} />
                         </button>
                         <button
                           className="reorder-btn"
-                          disabled={rIdx === racks.length - 1}
-                          onClick={() => handleMoveRack(r.id, 'RIGHT')}
-                          title="Move Rack Right"
+                          disabled={rIdx === displayRacks.length - 1}
+                          onClick={() => handleMoveRack(r.id, 'DOWN')}
+                          title="Move Rack Right in Row"
                         >
                           <ArrowDown size={13} />
                         </button>
@@ -504,18 +550,16 @@ export function Sidebar({
               {/* Multi-Rack Side Panel Filter Pill Selector (Ordered left-to-right matching row order) */}
               {selectedRackIds.length > 1 && (
                 <div className="multi-rack-selector-pills">
-                  {racks
-                    .filter((r) => selectedRackIds.includes(r.id))
-                    .map((rObj) => (
-                      <button
-                        key={rObj.id}
-                        className={`rack-pill-btn ${effectiveRackId === rObj.id ? 'active' : ''}`}
-                        onClick={() => setActiveEditingRackId(rObj.id)}
-                        title={`View ${rObj.name} switches in side panel`}
-                      >
-                        {rObj.name}
-                      </button>
-                    ))}
+                  {sortRacksByGridX(racks.filter((r) => selectedRackIds.includes(r.id))).map((rObj) => (
+                    <button
+                      key={rObj.id}
+                      className={`rack-pill-btn ${effectiveRackId === rObj.id ? 'active' : ''}`}
+                      onClick={() => setActiveEditingRackId(rObj.id)}
+                      title={`View ${rObj.name} switches in side panel`}
+                    >
+                      {rObj.name}
+                    </button>
+                  ))}
                 </div>
               )}
 

@@ -84,8 +84,8 @@ export function CanvasContainer({
         <directionalLight position={[-4, 4, -6]} intensity={0.6} color="#38bdf8" />
         <directionalLight position={[0, -4, 4]} intensity={0.3} color="#005aff" />
 
-        {/* Environment map for realistic metallic reflections */}
-        <Environment preset="city" />
+        {/* Environment map for realistic metallic reflections (frames={1} caches static HDR map) */}
+        <Environment preset="city" frames={1} />
 
         {/* Multi-Rack Data Center Row (Floor position Y = -1.503 anchors caster wheels flush to floor) */}
         <group position={[0, 0, 0]}>

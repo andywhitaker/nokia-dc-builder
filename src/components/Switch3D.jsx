@@ -94,11 +94,16 @@ export const Switch3D = React.memo(function Switch3D({
   // Smooth lerp Y-position in 3D space when reordered or swapped
   useFrame((state, delta) => {
     if (groupRef.current) {
-      groupRef.current.position.y = THREE.MathUtils.lerp(
-        groupRef.current.position.y,
-        targetPosY,
-        Math.min(delta * 14, 1)
-      );
+      const currentY = groupRef.current.position.y;
+      if (Math.abs(currentY - targetPosY) > 0.0005) {
+        groupRef.current.position.y = THREE.MathUtils.lerp(
+          currentY,
+          targetPosY,
+          Math.min(delta * 14, 1)
+        );
+      } else if (currentY !== targetPosY) {
+        groupRef.current.position.y = targetPosY;
+      }
     }
   });
 

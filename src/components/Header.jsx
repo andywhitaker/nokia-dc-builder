@@ -18,6 +18,7 @@ import {
   Palette,
 } from 'lucide-react';
 import { CABLE_COLOR_PALETTE } from '../App';
+import { sortRacksByGridX } from '../utils/rackHelpers';
 
 export function Header({
   racks = [],
@@ -68,11 +69,13 @@ export function Header({
     ? selectedRowId
     : rows[0]?.id || 'ALL';
 
-  // Filter visible racks by selected row
+  // Filter visible racks by selected row, sorted left-to-right matching floor grid
   const currentActiveRowId = mainViewMode === 'ELEVATION' ? activeElevationRowId : selectedRowId;
-  const filteredRacks = currentActiveRowId === 'ALL'
-    ? racks
-    : racks.filter((r) => r.rowId === currentActiveRowId);
+  const filteredRacks = sortRacksByGridX(
+    currentActiveRowId === 'ALL'
+      ? racks
+      : racks.filter((r) => r.rowId === currentActiveRowId)
+  );
 
   // Scroll rack badges left/right
   const handleScrollRacks = (direction) => {
